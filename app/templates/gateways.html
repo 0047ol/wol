@@ -1,0 +1,266 @@
+{% extends "base.html" %}
+{% block title %}网关列表 - WOL{% endblock %}
+{% block content %}
+<h1>ESP32-C3 网关列表</h1>
+
+<div class="card">
+  <h2>新增网关（预生成绑定密钥）</h2>
+  <form onsubmit="event.preventDefault(); createGateway()">
+    <div class="form-row">
+      <label>网关名称</label>
+      <input id="n" placeholder="例如：客厅网关 / 办公室 A" />
+    </div>
+    <div class="form-row">
+      <label>ESP32 MAC（必填）</label>
+      <input id="m" placeholder="AA:BB:CC:11:22:33" style="width:280px" />
+    </div>
+    <button type="submit">生成绑定密钥</button>
+    <span style="margin-left:12px;color:#666;font-size:12px">
+      提示：MAC 可在路由器后台或 ESP32 首次启动串口日志中查到
+    </span>
+  </form>
+</div>
+
+<div class="card">
+  <form style="margin-bottom:8px" onsubmit="event.preventDefault(); location.href='/?q='+document.getElementById('q').value">
+    <input id="q" value="{{ q }}" placeholder="搜索 MAC / IP / 名称" style="width:280px" />
+    <button type="submit" class="gray">搜索</button>
+  </form>
+
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th><th>名称</th><th>MAC</th><th>IP</th><th>状态</th>
+        <th>Ping周期</th><th>心跳超时</th><th>广播地址</th><th>扫描网段</th>
+        <th>最后心跳</th><th>操作</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for r in rows %}
+      <tr>
+        <td>{{ r.id }}</td>
+        <td>{{ r.name }}</td>
+        <td class="mono">{{ r.mac }}</td>
+        <td class="mono" id="hb-{{ r.id }}">{{ r.last_heartbeat or '-' }}</td>
+
+        <td>
+  <span class="badge {{ r.status }}" id="status-{{ r.id }}">{{ {'unbound':'未绑定','online':'在线','offline':'离线'}[r.status] }}</span>
+  <div id="bindmsg-{{ r.id }}" style="color:#dc2626;font-size:12px;margin-top:4px;{% if not r.bind_message %}display:none{% endif %}">{{ r.bind_message or '' }}</div>
+</td>
+
+        <td>{{ r.ping_interval }}s</td>
+        <td>{{ r.heartbeat_timeout }}s</td>
+        <td class="mono">{{ r.wol_broadcast_addr }}</td>
+        <td class="mono">{{ r.scan_cidr or '-' }}</td>
+        <td class="mono">{{ r.last_heartbeat or '-' }}</td>
+        <td class="row-actions">
+  <a href="/gateway/{{ r.id }}/devices"><button type="button" class="gray">子设备</button></a>
+  <button type="button" onclick="triggerScan({{ r.id }}, '{{ r.mac }}')" class="gray">扫描</button>
+  <button type="button" onclick="showKey({{ r.id }})">密钥</button>
+  <button type="button" onclick="showEdit({{ r.id }})">编辑</button>
+  {% if r.status == 'unbound' %}
+    <button type="button" class="danger" onclick="deleteGateway({{ r.id }})">删除</button>
+  {% elif r.status == 'online' %}
+    <button type="button" class="danger" onclick="unbind({{ r.id }})">解绑</button>
+  {% else %}
+    <button type="button" class="danger" disabled title="设备离线，无法下发重置指令，待上线后再解绑" style="opacity:.5;cursor:not-allowed">离线</button>
+  {% endif %}
+</td>
+
+      </tr>
+      <tr id="edit-{{ r.id }}" style="display:none;background:#f9fafb">
+        <td colspan="11">
+          <div style="padding:12px">
+            <div class="form-row"><label>名称</label><input id="en-{{ r.id }}" value="{{ r.name }}" /></div>
+            <div class="form-row"><label>Ping 周期(秒)</label><input id="ep-{{ r.id }}" type="number" value="{{ r.ping_interval }}" /></div>
+            <div class="form-row"><label>心跳超时(秒)</label><input id="eht-{{ r.id }}" type="number" value="{{ r.heartbeat_timeout }}" /></div>
+            <div class="form-row"><label>心跳发送(秒)</label><input id="ehs-{{ r.id }}" type="number" value="{{ r.heartbeat_send_interval }}" /></div>
+            <div class="form-row"><label>WOL 广播地址</label><input id="ewb-{{ r.id }}" value="{{ r.wol_broadcast_addr }}" /></div>
+            <div class="form-row"><label>扫描网段 CIDR</label><input id="esc-{{ r.id }}" value="{{ r.scan_cidr }}" placeholder="留空自动获取" /></div>
+            <div class="form-row"><label>扫描并发数</label><input id="escc-{{ r.id }}" type="number" value="{{ r.scan_concurrency }}" /></div>
+            <div class="form-row"><label>WiFi SSID（远程改）</label><input id="ewssid-{{ r.id }}" value="{{ r.wifi_ssid }}" /></div>
+            <div class="form-row"><label>WiFi 密码（远程改）</label><input id="ewpw-{{ r.id }}" value="{{ r.wifi_password }}" /></div>
+            <button onclick="postForm('/gateway/{{ r.id }}/update', {
+              name: document.getElementById('en-{{ r.id }}').value,
+              ping_interval: document.getElementById('ep-{{ r.id }}').value,
+              heartbeat_timeout: document.getElementById('eht-{{ r.id }}').value,
+              heartbeat_send_interval: document.getElementById('ehs-{{ r.id }}').value,
+              wol_broadcast_addr: document.getElementById('ewb-{{ r.id }}').value,
+              scan_cidr: document.getElementById('esc-{{ r.id }}').value,
+              scan_concurrency: document.getElementById('escc-{{ r.id }}').value,
+              wifi_ssid: document.getElementById('ewssid-{{ r.id }}').value,
+              wifi_password: document.getElementById('ewpw-{{ r.id }}').value
+            })">保存并下发</button>
+          </div>
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="11" style="text-align:center;color:#999;padding:24px">暂无网关，先在上方新增</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="pagination">
+    共 {{ total }} 条 / {{ total_pages }} 页
+    {% if page > 1 %}<a href="?page={{ page-1 }}&page_size={{ page_size }}&q={{ q }}">上一页</a>{% endif %}
+    第 {{ page }} 页
+    {% if page < total_pages %}<a href="?page={{ page+1 }}&page_size={{ page_size }}&q={{ q }}">下一页</a>{% endif %}
+  </div>
+</div>
+
+<div id="key-modal" class="modal-mask" style="display:none" onclick="if(event.target===this)closeKey()">
+  <div class="modal-box">
+    <h3 style="margin-top:0">绑定密钥</h3>
+    <p style="color:#666;font-size:13px">在 ESP32 配网页面填写此密钥，用于 MQTT 鉴权和指令签名。</p>
+    <div class="key-box" id="key-value" style="font-size:16px;padding:12px;word-break:break-all;border:1px solid #e5e7eb;border-radius:6px;background:#f9fafb"></div>
+    <p style="font-size:13px">MAC：<span class="mono" id="key-mac"></span></p>
+    <div style="text-align:right;margin-top:12px">
+      <button onclick="copyKey()">复制密钥</button>
+      <button class="gray" onclick="closeKey()" style="margin-left:8px">关闭</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block script %}
+<style>
+.modal-mask { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: flex; align-items: center; justify-content: center; z-index: 999; }
+.modal-box { background: #fff; border-radius: 8px; padding: 24px; width: 480px; max-width: 90%; box-shadow: 0 4px 20px rgba(0,0,0,.2); }
+</style>
+<script>
+function showEdit(id) {
+  const el = document.getElementById('edit-' + id);
+  el.style.display = el.style.display === 'none' ? '' : 'none';
+}
+function unbind(id) {
+  if (!confirm('解绑后将下发重置指令到 ESP32，设备会清空所有配置并重启进入配网模式，同时删除该网关及其下所有子设备记录。此操作不可恢复，确认继续？')) return;
+  postForm('/gateway/' + id + '/unbind', {});
+}
+function deleteGateway(id) {
+  if (!confirm('该网关尚未绑定成功，删除后将直接移除这条记录（不会向设备发送任何指令）。确认删除？')) return;
+  postForm('/gateway/' + id + '/unbind', {});
+}
+async function createGateway() {
+  const fd = new FormData();
+  fd.append('name', document.getElementById('n').value);
+  fd.append('mac', document.getElementById('m').value);
+  const r = await fetch('/gateway/create', {method:'POST', body: fd});
+  const j = await r.json();
+  if (!j.ok) { alert(j.msg || '失败'); return; }
+  document.getElementById('key-value').textContent = j.bind_key;
+  document.getElementById('key-mac').textContent = j.mac;
+  document.getElementById('key-modal').style.display = 'flex';
+}
+async function showKey(id) {
+  const r = await fetch('/gateway/' + id + '/key');
+  const j = await r.json();
+  if (!j.ok) { alert('读取失败'); return; }
+  document.getElementById('key-value').textContent = j.bind_key;
+  document.getElementById('key-mac').textContent = j.mac;
+  document.getElementById('key-modal').style.display = 'flex';
+}
+function closeKey() {
+  document.getElementById('key-modal').style.display = 'none';
+  location.reload();
+}
+function fallbackCopy(v) {
+  const ta = document.createElement('textarea');
+  ta.value = v;
+  document.body.appendChild(ta);
+  ta.select();
+  try {
+    document.execCommand('copy');
+    alert('已复制：' + v);
+  } catch (e) {
+    alert('复制失败，请手动复制：' + v);
+  }
+  document.body.removeChild(ta);
+}
+function copyKey() {
+  const v = document.getElementById('key-value').textContent;
+  if (!v) {
+    alert('没有可复制的密钥');
+    return;
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(v).then(() => {
+      alert('已复制：' + v);
+    }).catch(() => {
+      fallbackCopy(v);
+    });
+  } else {
+    fallbackCopy(v);
+  }
+}
+
+// 扫描按钮带轮询，用于任务锁 + 超时弹窗
+async function triggerScan(gid){
+  const res = await fetch(`/gateway/${gid}/scan/trigger`, {method:"POST"});
+  const j = await res.json();
+  if(!j.ok){ alert(j.msg); return; }
+  if (!j.cmd_id) { location.href = `/gateway/${gid}/scan`; return; }
+
+  const cmdId = j.cmd_id;
+  let pollCnt = 0;
+  const timer = setInterval(async () => {
+    pollCnt++;
+    try {
+      const r2 = await fetch(`/gateway/cmd_status/${cmdId}`);
+      const stat = await r2.json();
+      if (stat.status === "ok") {
+        clearInterval(timer);
+        location.href = `/gateway/${gid}/scan`;   // 直接跳扫描结果页
+      } else if (stat.status === "timeout" || stat.status === "fail") {
+        clearInterval(timer);
+        alert("设备未应答：" + (stat.msg || "") + "\n可稍后到扫描结果页查看是否有数据");
+        location.href = `/gateway/${gid}/scan`;
+      }
+    } catch (e) {}
+    if (pollCnt > 16) {
+      clearInterval(timer);
+      location.href = `/gateway/${gid}/scan`;
+    }
+  }, 500);
+}
+
+
+
+async function postForm(url, data) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify(data)
+  });
+  const ret = await res.json();
+  if(ret.ok){
+    location.reload();
+  }else{
+    alert(ret.msg || "操作失败");
+  }
+}
+// 局部刷新：每 5 秒拉一次网关状态，只更新 DOM，不刷新页面
+const STATUS_TEXT = {unbound: '未绑定', online: '在线', offline: '离线'};
+async function refreshGateways() {
+  try {
+    const r = await fetch('/api/gateways');
+    const list = await r.json();
+    for (const g of list) {
+      const el = document.getElementById('status-' + g.id);
+      if (el) {
+        el.className = 'badge ' + g.status;
+        el.textContent = STATUS_TEXT[g.status] || g.status;
+      }
+      const hm = document.getElementById('bindmsg-' + g.id);
+      if (hm) {
+        if (g.bind_message) { hm.textContent = g.bind_message; hm.style.display = ''; }
+        else { hm.style.display = 'none'; }
+      }
+      const hb = document.getElementById('hb-' + g.id);
+      if (hb) hb.textContent = g.last_heartbeat || '-';
+    }
+  } catch (e) { /* 静默失败 */ }
+}
+setInterval(refreshGateways, 5000);
+
+</script>
+{% endblock %}

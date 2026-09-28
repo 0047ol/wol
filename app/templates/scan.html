@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% block title %}扫描 - {{ gw.name }}{% endblock %}
+{% block content %}
+<h1>
+  局域网扫描
+  <small style="font-size:14px;color:#666">
+    （网关：{{ gw.name or gw.mac }} · 网段：{{ gw.scan_cidr or '自动获取' }} ·
+    <span class="badge {{ gw.status }}">{{ {'unbound':'未绑定','online':'在线','offline':'离线'}[gw.status] }}</span>）
+  </small>
+</h1>
+
+<div class="card">
+  <button id="scan-btn" onclick="triggerScan()">立即扫描</button>
+
+  <span style="margin-left:12px;color:#666;font-size:12px">
+    下发后 ESP32 执行 ARP 扫描，几秒后自动出现结果。
+  </span>
+</div>
+
+<div class="card">
+  <div style="margin-bottom:8px">
+    <button onclick="addSelected()" class="gray">把选中项一键添加为子设备</button>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th><input type="checkbox" onclick="document.querySelectorAll('.scan-check').forEach(c=>c.checked=this.checked)" /></th>
+        <th>ID</th><th>IP</th><th>MAC</th><th>发现时间</th>
+      </tr>
+    </thead>
+    <tbody id="scan-tbody">
+
+    {% for r in rows %}
+      <tr>
+        <td><input class="scan-check" type="checkbox" value="{{ r.id }}" /></td>
+        <td>{{ r.id }}</td>
+        <td class="mono">{{ r.ip }}</td>
+        <td class="mono">{{ r.mac }}</td>
+        <td class="mono">{{ r.created_at }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="5" style="text-align:center;color:#999;padding:24px">暂未扫描到设备，点上方"立即扫描"</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="pagination">
+    共 {{ total }} 条 / {{ total_pages }} 页
+    {% if page > 1 %}<a href="/gateway/{{ gw.id }}/scan?page={{ page-1 }}&page_size={{ page_size }}">上一页</a>{% endif %}
+    第 {{ page }} 页
+    {% if page < total_pages %}<a href="/gateway/{{ gw.id }}/scan?page={{ page+1 }}&page_size={{ page_size }}">下一页</a>{% endif %}
+  </div>
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+async function addSelected() {
+  const ids = [...document.querySelectorAll('.scan-check:checked')].map(c => c.value).join(',');
+  if (!ids) { alert('请先勾选扫描结果'); return; }
+  try {
+    const fd = new FormData();
+    fd.append('ids', ids);
+    const res = await fetch('/gateway/{{ gw.id }}/scan/add', {method: 'POST', body: fd});
+    const j = await res.json();
+    if (j.ok) {
+      // 添加成功，直接跳到子设备列表页
+      location.href = '/gateway/{{ gw.id }}/devices';
+    } else {
+      alert(j.msg || '添加失败');
+    }
+  } catch (e) {
+    alert('请求失败：' + e.message);
+  }
+}
+
+async function refreshScan() {
+  try {
+    const r = await fetch('/api/gateway/{{ gw.id }}/scan_results');
+    const list = await r.json();
+    const tbody = document.querySelector('#scan-tbody');
+    if (!tbody) return;
+    if (list.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#999;padding:24px">暂未扫描到设备，点上方"立即扫描"</td></tr>';
+      return;
+    }
+    tbody.innerHTML = list.map(h => `
+      <tr>
+        <td><input class="scan-check" type="checkbox" value="${h.id}" /></td>
+        <td>${h.id}</td>
+        <td class="mono">${h.ip}</td>
+        <td class="mono">${h.mac}</td>
+        <td class="mono">${h.created_at}</td>
+      </tr>
+    `).join('');
+  } catch (e) {}
+}
+setInterval(refreshScan, 3000);
+
+async function triggerScan() {
+  const btn = document.getElementById('scan-btn');
+  btn.disabled = true;
+  btn.textContent = '扫描中...';
+  try {
+    const res = await fetch('/gateway/{{ gw.id }}/scan/trigger', {method: 'POST'});
+    const j = await res.json();
+    if (!j.ok) {
+      alert(j.msg);
+      return;
+    }
+    if (j.cmd_id) {
+      // 轮询 ack
+      const cmdId = j.cmd_id;
+      let cnt = 0;
+      const timer = setInterval(async () => {
+        cnt++;
+        try {
+          const r2 = await fetch(`/gateway/cmd_status/${cmdId}`);
+          const stat = await r2.json();
+          if (stat.status === 'ok' || stat.status === 'timeout' || stat.status === 'fail') {
+            clearInterval(timer);
+            btn.disabled = false;
+            btn.textContent = '立即扫描';
+            // 局部刷新结果列表（你之前加的 refreshScan 会自动跑）
+          }
+        } catch (e) {}
+        if (cnt > 16) {
+          clearInterval(timer);
+          btn.disabled = false;
+          btn.textContent = '立即扫描';
+        }
+      }, 500);
+    }
+  } finally {
+    // 错误时也恢复按钮
+    setTimeout(() => { btn.disabled = false; btn.textContent = '立即扫描'; }, 8000);
+  }
+}
+
+</script>
+{% endblock %}

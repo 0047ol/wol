@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+{% block title %}调试 - WOL{% endblock %}
+{% block content %}
+<h1>调试面板</h1>
+
+<div class="card">
+  <h2>系统状态</h2>
+  <table>
+    <tr><td>HTTP 端口</td><td class="mono">{{ settings.PORT }}</td></tr>
+    <tr><td>MQTT Broker</td><td class="mono">{{ settings.MQTT_HOST }}:{{ settings.MQTT_PORT }}</td></tr>
+    <tr><td>MQTT 用户名</td><td class="mono">{{ settings.MQTT_USERNAME }}</td></tr>
+    <tr>
+        <td>MQTT 已连接</td>
+        <td id="mqtt-connected">
+            <span class="badge offline">加载中...</span>
+        </td>
+    </tr>
+    <tr><td>最近连接时间</td><td class="mono" id="mqtt-last-con">-</td></tr>
+    <tr><td>最近断开时间</td><td class="mono" id="mqtt-last-disc">-</td></tr>
+    <tr><td>主题前缀</td><td class="mono">{{ settings.MQTT_TOPIC_PREFIX }}</td></tr>
+  </table>
+</div>
+
+<div class="card">
+  <h2>网关实时状态</h2>
+  <table>
+    <thead><tr><th>ID</th><th>MAC</th><th>IP</th><th>状态</th><th>最后心跳</th><th>绑定消息</th></tr></thead>
+    <tbody id="gateway-body">
+      <tr><td colspan="6" style="text-align:center;color:#999">加载网关...</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>最近 MQTT 收发报文（最多 100 条）</h2>
+  <table>
+    <thead><tr><th>方向</th><th>时间</th><th>主题</th><th>内容</th></tr></thead>
+    <tbody id="mqtt-log-body">
+      <tr><td colspan="4" style="text-align:center;color:#999">加载报文...</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>最近指令日志（cmd_log）</h2>
+  <table>
+    <thead><tr><th>ID</th><th>网关ID</th><th>类型</th><th>状态</th><th>内容</th><th>下发时间</th><th>应答时间</th><th>应答消息</th></tr></thead>
+    <tbody id="cmd-log-body">
+      <tr><td colspan="8" style="text-align:center;color:#999">加载指令...</td></tr>
+    </tbody>
+  </table>
+  <p style="margin-top:8px"><a href="/api/debug/mqtt" target="_blank">MQTT JSON接口</a> · <a href="/api/debug/db" target="_blank">DB JSON接口</a> · <a href="/">返回网关列表</a></p>
+</div>
+
+<script>
+// 统一刷新函数，一次性拉取两组接口
+async function refreshAll(){
+    // 并行请求
+    const [mqttRes, dbRes] = await Promise.all([
+        fetch("/api/debug/mqtt"),
+        fetch("/api/debug/db")
+    ]);
+    const mqttData = await mqttRes.json();
+    const dbData = await dbRes.json();
+
+    // ========== MQTT系统状态 ==========
+    const connEl = document.getElementById("mqtt-connected");
+    if(mqttData.connected){
+        connEl.innerHTML = `<span class="badge online">已连接</span>`;
+    }else{
+        connEl.innerHTML = `<span class="badge offline">未连接</span>`;
+    }
+    document.getElementById("mqtt-last-con").innerText = mqttData.last_connect_ts || "-";
+    document.getElementById("mqtt-last-disc").innerText = mqttData.last_disconnect_ts || "-";
+
+    // ========== MQTT报文日志 ==========
+    const logBody = document.getElementById("mqtt-log-body");
+    logBody.innerHTML = "";
+    if(!mqttData.msg_log || mqttData.msg_log.length ===0){
+        logBody.innerHTML = `<tr><td colspan="4" style="text-align:center;color:#999">暂无报文</td></tr>`;
+    }else{
+        mqttData.msg_log.forEach(m=>{
+            const dirBadge = m.dir === 'IN' ? `<span class="badge online">收</span>` : `<span class="badge unbound">发</span>`;
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td>${dirBadge}</td>
+                <td class="mono" style="white-space:nowrap">${m.ts}</td>
+                <td class="mono">${m.topic}</td>
+                <td class="mono" style="word-break:break-all;max-width:600px">${m.payload}</td>
+            `;
+            logBody.appendChild(tr);
+        })
+    }
+
+    // ========== 网关列表 ==========
+    const gwBody = document.getElementById("gateway-body");
+    gwBody.innerHTML = "";
+    if(!dbData.gateways || dbData.gateways.length ===0){
+        gwBody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:#999">暂无网关</td></tr>`;
+    }else{
+        dbData.gateways.forEach(g=>{
+            let statusClass = "unbound";
+            let statusText = "未绑定";
+            if(g.status === "online"){
+                statusClass = "online";
+                statusText = "在线";
+            }else if(g.status === "offline"){
+                statusClass = "offline";
+                statusText = "离线";
+            }
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td>${g.id}</td>
+                <td class="mono">${g.mac}</td>
+                <td class="mono">${g.ip || '-'}</td>
+                <td><span class="badge ${statusClass}">${statusText}</span></td>
+                <td class="mono">${g.last_heartbeat || '-'}</td>
+                <td style="color:#dc2626">${g.bind_message || ''}</td>
+            `;
+            gwBody.appendChild(tr);
+        })
+    }
+
+    // ========== cmd指令日志 ==========
+    const cmdBody = document.getElementById("cmd-log-body");
+    cmdBody.innerHTML = "";
+    if(!dbData.cmds || dbData.cmds.length ===0){
+        cmdBody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:#999">暂无指令</td></tr>`;
+    }else{
+        dbData.cmds.forEach(c=>{
+            let statusClass = "unbound";
+            if(c.status === "ok") statusClass = "online";
+            else if(c.status === "failed" || c.status === "timeout") statusClass = "offline";
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td>${c.id}</td>
+                <td>${c.gateway_id}</td>
+                <td class="mono">${c.cmd_type}</td>
+                <td><span class="badge ${statusClass}">${c.status}</span></td>
+                <td class="mono" style="word-break:break-all;max-width:300px">${c.payload || ""}</td>
+                <td class="mono">${c.created_at || '-'}</td>
+                <td class="mono">${c.ack_at || '-'}</td>
+                <td>${c.ack_msg || ''}</td>
+            `;
+            cmdBody.appendChild(tr);
+        })
+    }
+}
+
+// 首次加载 + 每秒自动刷新
+refreshAll();
+setInterval(refreshAll,1000);
+</script>
+{% endblock %}

@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>多设备WOL唤醒系统</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: white;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 28px;
+        }
+        .card {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        .card h2 {
+            font-size: 18px;
+            color: #333;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .device-item {
+            display: flex;
+            align-items: center;
+            padding: 15px;
+            border: 2px solid #eee;
+            border-radius: 10px;
+            margin-bottom: 10px;
+            transition: all 0.2s;
+        }
+        .device-item.online {
+            border-color: #28a745;
+            background: #f0fff4;
+        }
+        .device-item:hover {
+            background: #f8f9fa;
+        }
+        .device-checkbox {
+            width: 18px;
+            height: 18px;
+            margin-right: 15px;
+            cursor: pointer;
+        }
+        .device-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-right: 15px;
+        }
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+        .status-online .status-dot {
+            background: #28a745;
+            box-shadow: 0 0 8px #28a745;
+        }
+        .status-offline .status-dot {
+            background: #dc3545;
+        }
+        .status-text {
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .status-online .status-text { color: #28a745; }
+        .status-offline .status-text { color: #dc3545; }
+        .device-info {
+            flex: 1;
+        }
+        .device-name {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 3px;
+        }
+        .device-mac {
+            font-size: 13px;
+            color: #666;
+        }
+        .device-actions {
+            display: flex;
+            gap: 10px;
+        }
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: opacity 0.2s;
+        }
+        .btn:hover { opacity: 0.9; }
+        .btn-wake {
+            background: #28a745;
+            color: white;
+        }
+        .btn-delete {
+            background: #dc3545;
+            color: white;
+        }
+        .bulk-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        .btn-bulk {
+            flex: 1;
+            padding: 12px 24px;
+            font-size: 16px;
+            border-radius: 8px;
+            color: white;
+        }
+        .btn-bulk-wake {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .btn-bulk-del {
+            background: #dc3545;
+        }
+        .form-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .form-group input {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        .btn-add {
+            background: #17a2b8;
+            color: white;
+            padding: 10px 20px;
+        }
+        .toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 15px;
+        }
+        .select-all {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            color: #666;
+        }
+        .empty-tip {
+            text-align: center;
+            color: #999;
+            padding: 30px;
+        }
+        .btn-scan {
+            background: #ffc107;
+            color: #333;
+            padding: 6px 12px;
+            font-size: 13px;
+        }
+        .scan-result {
+            margin-top: 15px;
+            padding: 15px;
+            background: #fff3cd;
+            border-radius: 8px;
+            display: none;
+        }
+        .scan-result.show { display: block; }
+        .scan-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid #eee;
+        }
+        .btn-quick-add {
+            background: #28a745;
+            color: white;
+            padding: 5px 12px;
+            font-size: 13px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🖥️ 多设备WOL远程唤醒</h1>
+
+        <!-- 设备列表 -->
+        <div class="card">
+            <h2>
+                设备列表
+                <button class="btn btn-scan" onclick="scanLan()">🔍 扫描局域网设备</button>
+            </h2>
+            <!-- 扫描结果 -->
+            <div class="scan-result" id="scanResult">
+                <strong>扫描到的新设备：</strong>
+                <div id="scanList"></div>
+            </div>
+            <div class="toolbar">
+                <label class="select-all">
+                    <input type="checkbox" id="selectAll" onchange="toggleSelectAll()"> 全选
+                </label>
+                <span id="selectedCount">已选 0 台</span>
+            </div>
+            <div id="deviceList"></div>
+            <div class="bulk-actions">
+                <button class="btn btn-bulk btn-bulk-wake" onclick="bulkWake()">🔆 批量唤醒</button>
+                <button class="btn btn-bulk btn-bulk-del" onclick="bulkDelete()">🗑️ 批量删除</button>
+            </div>
+        </div>
+
+        <!-- 手动添加设备 -->
+        <div class="card">
+            <h2>➕ 手动添加设备</h2>
+            <div class="form-group">
+                <input type="text" id="deviceName" placeholder="设备名称（如：办公室台式机）">
+                <input type="text" id="deviceMac" placeholder="MAC地址（如：AA:BB:CC:DD:EE:FF）">
+                <button class="btn btn-add" onclick="addDevice()">添加</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let devices = [];
+
+        async function loadDevices() {
+            const res = await fetch('/api/devices');
+            const data = await res.json();
+            devices = data.devices;
+            renderDevices();
+            updateSelectedCount();
+        }
+
+        function renderDevices() {
+            const listEl = document.getElementById('deviceList');
+            if (devices.length === 0) {
+                listEl.innerHTML = '<div class="empty-tip">暂无设备，请先添加或扫描</div>';
+                return;
+            }
+            listEl.innerHTML = devices.map(d => `
+                <div class="device-item ${d.status === 'online' ? 'online' : ''}">
+                    <input type="checkbox" class="device-checkbox" data-id="${d.id}" onchange="updateSelectedCount()">
+                    <div class="device-status status-${d.status}">
+                        <div class="status-dot"></div>
+                        <span class="status-text">${d.status === 'online' ? '在线' : '离线'}</span>
+                    </div>
+                    <div class="device-info">
+                        <div class="device-name">${d.name}</div>
+                        <div class="device-mac">${d.mac}</div>
+                    </div>
+                    <div class="device-actions">
+                        <button class="btn btn-wake" onclick="wakeSingle('${d.id}')">唤醒</button>
+                        <button class="btn btn-delete" onclick="deleteDevice('${d.id}')">删除</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function toggleSelectAll() {
+            const checked = document.getElementById('selectAll').checked;
+            document.querySelectorAll('.device-checkbox').forEach(cb => cb.checked = checked);
+            updateSelectedCount();
+        }
+
+        function updateSelectedCount() {
+            const checked = document.querySelectorAll('.device-checkbox:checked');
+            document.getElementById('selectedCount').textContent = `已选 ${checked.length} 台`;
+        }
+
+        async function wakeSingle(id) {
+            await fetch(`/api/devices/${id}/wake`, { method: 'POST' });
+            alert('唤醒指令已下发');
+        }
+
+        async function bulkWake() {
+            const selected = getSelectedIds();
+            if (selected.length === 0) {
+                alert('请先选择设备');
+                return;
+            }
+            await fetch('/api/devices/bulk-wake', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ device_ids: selected })
+            });
+            alert(`已下发 ${selected.length} 台设备的唤醒指令`);
+        }
+
+        async function bulkDelete() {
+            const selected = getSelectedIds();
+            if (selected.length === 0) {
+                alert('请先选择设备');
+                return;
+            }
+            if (!confirm(`确定删除选中的 ${selected.length} 台设备？`)) return;
+            await fetch('/api/devices/bulk-delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ device_ids: selected })
+            });
+            loadDevices();
+        }
+
+        function getSelectedIds() {
+            return Array.from(document.querySelectorAll('.device-checkbox:checked')).map(cb => cb.dataset.id);
+        }
+
+        async function addDevice() {
+            const name = document.getElementById('deviceName').value.trim();
+            const mac = document.getElementById('deviceMac').value.trim();
+            if (!name || !mac) {
+                alert('请填写设备名称和MAC地址');
+                return;
+            }
+            await fetch('/api/devices', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, mac })
+            });
+            document.getElementById('deviceName').value = '';
+            document.getElementById('deviceMac').value = '';
+            loadDevices();
+        }
+
+        async function deleteDevice(id) {
+            if (!confirm('确定删除该设备？')) return;
+            await fetch(`/api/devices/${id}`, { method: 'DELETE' });
+            loadDevices();
+        }
+
+        async function scanLan() {
+            alert('正在下发扫描指令，请等待5-10秒...');
+            await fetch('/api/scan', { method: 'POST' });
+            setTimeout(() => {
+                const scanDevices = [
+                    { mac: "11:22:33:44:55:66", ip: "192.168.1.100" },
+                    { mac: "AA:BB:CC:11:22:33", ip: "192.168.1.105" }
+                ];
+                renderScanResult(scanDevices);
+            }, 3000);
+        }
+
+        function renderScanResult(list) {
+            const resultEl = document.getElementById('scanResult');
+            const listEl = document.getElementById('scanList');
+            resultEl.classList.add('show');
+            listEl.innerHTML = list.map((item, idx) => `
+                <div class="scan-item">
+                    <div>
+                        <div>MAC: ${item.mac}</div>
+                        <div style="font-size:12px;color:#666">IP: ${item.ip}</div>
+                    </div>
+                    <button class="btn btn-quick-add" onclick="quickAdd('${item.mac}', '${item.ip}')">一键添加</button>
+                </div>
+            `).join('');
+        }
+
+        async function quickAdd(mac, ip) {
+            await fetch('/api/devices', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: `设备-${ip}`, mac: mac })
+            });
+            loadDevices();
+            alert(`设备 ${mac} 已添加`);
+        }
+
+        setInterval(loadDevices, 2000);
+        loadDevices();
+    </script>
+</body>
+</html>

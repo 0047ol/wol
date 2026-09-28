@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}子设备 - {{ gw.name }}{% endblock %}
+{% block content %}
+<h1>
+  子设备列表
+  <small style="font-size:14px;color:#666">
+    （网关：{{ gw.name or gw.mac }} ·
+    <span class="badge {{ gw.status }}">{{ {'unbound':'未绑定','online':'在线','offline':'离线'}[gw.status] }}</span>）
+  </small>
+</h1>
+
+<div class="card">
+  <h2>批量新增（每行：名称,MAC,IP 或 名称,MAC）</h2>
+  <textarea id="new-lines" placeholder="办公主机,AA:BB:CC:11:22:33,192.168.1.20&#10;NAS,AA:BB:CC:11:22:44,192.168.1.21"></textarea>
+  <div style="margin-top:8px">
+    <button onclick="postForm('/gateway/{{ gw.id }}/devices/batch_add', {
+      lines: document.getElementById('new-lines').value
+    })">添加并同步到网关</button>
+  </div>
+</div>
+
+<div class="card">
+  <div style="margin-bottom:8px">
+    <button onclick="wakeSelected()" class="gray">唤醒选中</button>
+    <button onclick="deleteSelected()" class="danger">删除选中</button>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th><input type="checkbox" onclick="document.querySelectorAll('.dev-check').forEach(c=>c.checked=this.checked)" /></th>
+        <th>ID</th><th>名称</th><th>MAC</th><th>IP</th><th>状态</th><th>最后上报</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for r in rows %}
+      <tr>
+        <td><input class="dev-check" type="checkbox" value="{{ r.id }}" /></td>
+        <td>{{ r.id }}</td>
+        <td>{{ r.name }}</td>
+        <td class="mono">{{ r.mac }}</td>
+        <td class="mono">{{ r.ip or '-' }}</td>
+<td><span class="badge {{ r.status }}" id="dev-status-{{ r.id }}">{{ '在线' if r.status=='online' else '离线' }}</span></td>
+<td class="mono" id="dev-report-{{ r.id }}">{{ r.last_report or '-' }}</td>
+
+      </tr>
+    {% else %}
+      <tr><td colspan="7" style="text-align:center;color:#999;padding:24px">暂无设备，可在上方批量添加或从扫描结果一键添加</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="pagination">
+    共 {{ total }} 条 / {{ total_pages }} 页
+    {% if page > 1 %}<a href="/gateway/{{ gw.id }}/devices?page={{ page-1 }}&page_size={{ page_size }}">上一页</a>{% endif %}
+    第 {{ page }} 页
+    {% if page < total_pages %}<a href="/gateway/{{ gw.id }}/devices?page={{ page+1 }}&page_size={{ page_size }}">下一页</a>{% endif %}
+  </div>
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+function getSelected() {
+  return [...document.querySelectorAll('.dev-check:checked')].map(c => c.value).join(',');
+}
+function wakeSelected() {
+  const ids = getSelected();
+  if (!ids) { alert('请先勾选设备'); return; }
+  if (!confirm('将向选中的设备发送 WOL 魔术包（仅代表发包成功，开机需几秒后由网关探测确认）')) return;
+  postForm('/gateway/{{ gw.id }}/devices/wake', {ids});
+}
+function deleteSelected() {
+  const ids = getSelected();
+  if (!ids) { alert('请先勾选设备'); return; }
+  if (!confirm('确认删除选中的设备？将同步从网关本地列表移除。')) return;
+  postForm('/gateway/{{ gw.id }}/devices/batch_delete', {ids});
+}
+async function refreshDevices() {
+  try {
+    const r = await fetch('/api/gateway/{{ gw.id }}/devices');
+    const list = await r.json();
+    for (const d of list) {
+      const el = document.getElementById('dev-status-' + d.id);
+      if (el) {
+        el.className = 'badge ' + d.status;
+        el.textContent = d.status === 'online' ? '在线' : '离线';
+      }
+      const rp = document.getElementById('dev-report-' + d.id);
+      if (rp) rp.textContent = d.last_report || '-';
+    }
+  } catch (e) {}
+}
+setInterval(refreshDevices, 5000);
+
+</script>
+{% endblock %}

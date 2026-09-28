@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>{% block title %}WOL 开机管理{% endblock %}</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<nav>
+  <a href="/">网关列表</a>
+  <span class="sep">|</span>
+  <span class="brand">WOL 开机管理系统</span>
+</nav>
+<main>
+  {% block content %}{% endblock %}
+</main>
+<script>
+async function postForm(url, data) {
+  const fd = new FormData();
+  for (const k in data) fd.append(k, data[k]);
+  const r = await fetch(url, {method: 'POST', body: fd});
+  const j = await r.json();
+  alert(j.msg || JSON.stringify(j));
+  if (j.ok) location.reload();
+}
+</script>
+{% block script %}{% endblock %}
+</body>
+</html>
